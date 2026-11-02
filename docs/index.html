@@ -1,6 +1,6 @@
 
 <!DOCTYPE html>
-<html lang="en">
+<html lang="it">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,75 +11,95 @@
             font-family: Arial, sans-serif;
             background: #111827;
             color: white;
-            padding: 25px;
             text-align: center;
+            padding: 30px 15px;
         }
 
-        h1 { color: #60a5fa; }
-
-        .sensor {
+        .container {
+            max-width: 500px;
+            margin: auto;
             background: #1f2937;
-            padding: 15px;
-            margin: 12px auto;
-            border-radius: 12px;
-            max-width: 400px;
+            padding: 25px;
+            border-radius: 15px;
         }
 
-        .value {
-            font-size: 20px;
-            color: #34d399;
-        }
-
-        button {
-            padding: 14px 20px;
-            margin: 8px;
+        select, button {
+            width: 100%;
+            padding: 14px;
+            margin: 10px 0;
             border: none;
             border-radius: 8px;
             font-size: 16px;
-            cursor: pointer;
         }
 
-        #start { background: #2563eb; color: white; }
-        #stop { background: #dc2626; color: white; }
-        #download { background: #059669; color: white; }
+        button {
+            cursor: pointer;
+            background: #2563eb;
+            color: white;
+        }
+
+        button:disabled {
+            background: #4b5563;
+            cursor: not-allowed;
+        }
+
+        #stopButton {
+            background: #dc2626;
+        }
+
+        #status {
+            margin-top: 20px;
+            color: #93c5fd;
+        }
     </style>
 </head>
 
 <body>
 
+<div class="container">
+
     <h1>iPhone AI Sensor Lab</h1>
-    <p>Real-time sensor acquisition</p>
+    <p>Real-time sensor data collection</p>
 
-    <div class="sensor">
-        <h3>Accelerometer (m/s²)</h3>
-        <p class="value" id="accX">X: --</p>
-        <p class="value" id="accY">Y: --</p>
-        <p class="value" id="accZ">Z: --</p>
-    </div>
+    <label for="activity">Select activity</label>
 
-    <div class="sensor">
-        <h3>Gyroscope (deg/s)</h3>
-        <p class="value" id="gyroX">X: --</p>
-        <p class="value" id="gyroY">Y: --</p>
-        <p class="value" id="gyroZ">Z: --</p>
-    </div>
+    <select id="activity">
+        <option value="stationary">Stationary</option>
+        <option value="walking">Walking</option>
+        <option value="running">Running</option>
+    </select>
 
-    <p id="status">Waiting for sensor permission...</p>
-    <p id="counter">Samples: 0</p>
+    <button id="startButton">Start Recording</button>
 
-    <button id="start">Start recording</button>
-    <button id="stop">Stop recording</button>
-    <button id="download">Download CSV</button>
+    <button id="stopButton" disabled>Stop Recording</button>
+
+    <button id="downloadButton" disabled>Download CSV</button>
+
+    <h3 id="status">Ready</h3>
+
+    <p id="sampleCount">Samples: 0</p>
+
+</div>
 
 <script>
 
 let samples = [];
 let recording = false;
-let startTime = null;
+let startTime = 0;
+let recordingId = "";
+let selectedActivity = "";
 
-const status = document.getElementById("status");
+const activitySelect = document.getElementById("activity");
+const startButton = document.getElementById("startButton");
+const stopButton = document.getElementById("stopButton");
+const downloadButton = document.getElementById("downloadButton");
+const statusText = document.getElementById("status");
+const sampleCount = document.getElementById("sampleCount");
+
 
 function handleMotion(event) {
+
+    if (!recording) return;
 
     const acceleration = event.accelerationIncludingGravity;
     const rotation = event.rotationRate;
@@ -89,76 +109,76 @@ function handleMotion(event) {
     const timestamp = (performance.now() - startTime) / 1000;
 
     const sample = {
-        timestamp: timestamp,
+        timestamp: timestamp.toFixed(3),
+
         acc_x: acceleration.x,
         acc_y: acceleration.y,
         acc_z: acceleration.z,
-        gyro_alpha: rotation?.alpha ?? null,
-        gyro_beta: rotation?.beta ?? null,
-        gyro_gamma: rotation?.gamma ?? null
+
+        gyro_alpha: rotation ? rotation.alpha : null,
+        gyro_beta: rotation ? rotation.beta : null,
+        gyro_gamma: rotation ? rotation.gamma : null,
+
+        activity: selectedActivity,
+        recording_id: recordingId
     };
 
-    if (recording) {
-        samples.push(sample);
-        document.getElementById("counter").textContent =
-            "Samples: " + samples.length;
-    }
+    samples.push(sample);
 
-    document.getElementById("accX").textContent =
-        "X: " + sample.acc_x?.toFixed(3);
-
-    document.getElementById("accY").textContent =
-        "Y: " + sample.acc_y?.toFixed(3);
-
-    document.getElementById("accZ").textContent =
-        "Z: " + sample.acc_z?.toFixed(3);
-
-    document.getElementById("gyroX").textContent =
-        "Alpha: " + sample.gyro_alpha;
-
-    document.getElementById("gyroY").textContent =
-        "Beta: " + sample.gyro_beta;
-
-    document.getElementById("gyroZ").textContent =
-        "Gamma: " + sample.gyro_gamma;
+    sampleCount.textContent = "Samples: " + samples.length;
 }
 
-document.getElementById("start").onclick = async () => {
 
-    if (recording) return;
+async function startRecording() {
 
-    if (typeof DeviceMotionEvent === "undefined") {
-        status.textContent = "Motion sensors not supported.";
+    if (!window.DeviceMotionEvent) {
+        statusText.textContent = "DeviceMotion not supported";
         return;
     }
 
-    if (typeof DeviceMotionEvent.requestPermission === "function") {
+    try {
 
-        try {
-            const permission =
-                await DeviceMotionEvent.requestPermission();
+        // iOS Safari may require permission.
+        if (typeof DeviceMotionEvent.requestPermission === "function") {
+
+            const permission = await DeviceMotionEvent.requestPermission();
 
             if (permission !== "granted") {
-                status.textContent = "Permission denied.";
+                statusText.textContent = "Sensor permission denied";
                 return;
             }
-
-        } catch (error) {
-            status.textContent = error.message;
-            return;
         }
+
+        samples = [];
+
+        selectedActivity = activitySelect.value;
+
+        recordingId =
+            selectedActivity + "_" +
+            new Date().toISOString().replace(/[:.]/g, "-");
+
+        startTime = performance.now();
+
+        recording = true;
+
+        window.addEventListener("devicemotion", handleMotion);
+
+        startButton.disabled = true;
+        stopButton.disabled = false;
+        downloadButton.disabled = true;
+        activitySelect.disabled = true;
+
+        statusText.textContent = "Recording: " + selectedActivity;
+
+    } catch (error) {
+
+        statusText.textContent = "Error: " + error.message;
+
     }
+}
 
-    samples = [];
-    startTime = performance.now();
-    recording = true;
 
-    window.addEventListener("devicemotion", handleMotion);
-
-    status.textContent = "Recording...";
-};
-
-document.getElementById("stop").onclick = () => {
+function stopRecording() {
 
     if (!recording) return;
 
@@ -166,17 +186,33 @@ document.getElementById("stop").onclick = () => {
 
     window.removeEventListener("devicemotion", handleMotion);
 
-    status.textContent = "Recording stopped.";
-};
+    startButton.disabled = false;
+    stopButton.disabled = true;
+    activitySelect.disabled = false;
 
-document.getElementById("download").onclick = () => {
+    downloadButton.disabled = samples.length === 0;
 
-    if (samples.length === 0) {
-        status.textContent = "No data available.";
-        return;
-    }
+    statusText.textContent =
+        "Recording stopped: " + samples.length + " samples";
 
-    const headers = Object.keys(samples[0]);
+}
+
+
+function downloadCSV() {
+
+    if (samples.length === 0) return;
+
+    const headers = [
+        "timestamp",
+        "acc_x",
+        "acc_y",
+        "acc_z",
+        "gyro_alpha",
+        "gyro_beta",
+        "gyro_gamma",
+        "activity",
+        "recording_id"
+    ];
 
     const rows = samples.map(sample =>
         headers.map(header => sample[header] ?? "").join(",")
@@ -187,19 +223,29 @@ document.getElementById("download").onclick = () => {
         ...rows
     ].join("\n");
 
-    const blob = new Blob([csv], { type: "text/csv" });
+    const blob = new Blob([csv], {
+        type: "text/csv;charset=utf-8;"
+    });
 
     const url = URL.createObjectURL(blob);
 
     const link = document.createElement("a");
 
     link.href = url;
-    link.download = "iphone_sensor_data.csv";
+    link.download = recordingId + ".csv";
 
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
 
     URL.revokeObjectURL(url);
-};
+
+}
+
+
+startButton.addEventListener("click", startRecording);
+stopButton.addEventListener("click", stopRecording);
+downloadButton.addEventListener("click", downloadCSV);
 
 </script>
 
